@@ -37,6 +37,7 @@ public class MovieUpdateHandler : Service<Movie>, IRequestHandler<MovieUpdateReq
         if (entity is null)
             return Error("Movie not found!");
 
+        Delete(entity.MovieGenres);
         entity.Name = request.Name?.Trim();
         entity.ReleaseDate = request.ReleaseDate;
         entity.TotalRevenue = request.TotalRevenue;
