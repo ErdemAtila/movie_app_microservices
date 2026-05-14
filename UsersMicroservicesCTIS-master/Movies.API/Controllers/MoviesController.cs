@@ -13,6 +13,7 @@ namespace Movies.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize(Roles = "Admin")]
     public class MoviesController : ControllerBase
     {
         private readonly ILogger<MoviesController> _logger;
@@ -27,7 +28,7 @@ namespace Movies.API.Controllers
 
         // GET: api/Movies
         [HttpGet]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<IActionResult> Get()
         {
             try
@@ -47,7 +48,6 @@ namespace Movies.API.Controllers
 
         // GET: api/Movies/5
         [HttpGet("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Get(int id)
         {
             try
@@ -67,7 +67,6 @@ namespace Movies.API.Controllers
 
         // POST: api/Movies
         [HttpPost]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Post(MovieCreateRequest request)
         {
             try
@@ -90,7 +89,6 @@ namespace Movies.API.Controllers
 
         // PUT: api/Movies
         [HttpPut]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Put(MovieUpdateRequest request)
         {
             try
@@ -113,7 +111,6 @@ namespace Movies.API.Controllers
 
         // DELETE: api/Movies/5
         [HttpDelete("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Delete(int id)
         {
             try
