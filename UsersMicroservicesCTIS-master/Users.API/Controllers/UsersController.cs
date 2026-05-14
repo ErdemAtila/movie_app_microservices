@@ -1,5 +1,6 @@
 ﻿#nullable disable
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using MediatR;
 using CORE.APP.Models;
@@ -10,6 +11,7 @@ namespace Users.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize(Roles = "Admin")]
     public class UsersController : ControllerBase
     {
         private readonly ILogger<UsersController> _logger;
@@ -24,6 +26,7 @@ namespace Users.API.Controllers
 
         // GET: api/Users
         [HttpGet]
+        [AllowAnonymous]
         public async Task<IActionResult> Get()
         {
             try
@@ -72,7 +75,7 @@ namespace Users.API.Controllers
             }
         }
 
-		// POST: api/Users
+        // POST: api/Users
         [HttpPost]
         public async Task<IActionResult> Post(UserCreateRequest request)
         {
