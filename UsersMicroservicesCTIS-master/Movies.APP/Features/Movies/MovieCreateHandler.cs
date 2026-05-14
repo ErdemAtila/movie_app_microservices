@@ -38,13 +38,24 @@ namespace Movies.APP.Features.Movies
             if (await DbSet().AnyAsync(m => m.Name == request.Name && m.DirectorId == request.DirectorId, cancellationToken))
                 return Error("Movie with the same name and director already exists!");
 
+            if (!await DbSet<Director>().AnyAsync(d => d.Id == request.DirectorId, cancellationToken))
+                return Error("Director not found!");
+
+            if (request.GenreIds != null && request.GenreIds.Any())
+            {
+                var existingGenreIds = await DbSet<Genre>().Where(g => request.GenreIds.Contains(g.Id)).Select(g => g.Id).ToListAsync(cancellationToken);
+                var missingGenreIds = request.GenreIds.Except(existingGenreIds).ToList();
+                if (missingGenreIds.Any())
+                    return Error("One or more of the provided genres were not found!");
+            }
+
             var entity = new Movie
             {
                 Name = request.Name.Trim(),
                 ReleaseDate = request.ReleaseDate,
                 TotalRevenue = request.TotalRevenue,
                 DirectorId = request.DirectorId,
-                MovieGenres = request.GenreIds.Select(id => new MovieGenre { GenreId = id }).ToList()
+                MovieGenres = request.GenreIds.Distinct().Select(id => new MovieGenre { GenreId = id }).ToList()
             };
 
             await CreateAsync(entity, cancellationToken);

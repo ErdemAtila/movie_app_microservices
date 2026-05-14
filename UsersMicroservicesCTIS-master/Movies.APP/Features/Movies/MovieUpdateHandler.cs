@@ -31,11 +31,22 @@ public class MovieUpdateHandler : Service<Movie>, IRequestHandler<MovieUpdateReq
     public async Task<CommandResponse> Handle(MovieUpdateRequest request, CancellationToken cancellationToken)
     {
         if (await DbSet().AnyAsync(m => m.Id != request.Id && m.Name == request.Name.Trim(), cancellationToken))
-            return Error($"Movie with the same name: \"{request.Name.Trim()}\" exists!");
+            return Error("Movie with the same name already exists!");
 
         var entity = await DbSet().Include(m => m.MovieGenres).SingleOrDefaultAsync(m => m.Id == request.Id, cancellationToken);
         if (entity is null)
             return Error("Movie not found!");
+
+        if (!await DbSet<Director>().AnyAsync(d => d.Id == request.DirectorId, cancellationToken))
+            return Error("Director not found!");
+
+        if (request.GenreIds != null && request.GenreIds.Any())
+        {
+            var existingGenreIds = await DbSet<Genre>().Where(g => request.GenreIds.Contains(g.Id)).Select(g => g.Id).ToListAsync(cancellationToken);
+            var missingGenreIds = request.GenreIds.Except(existingGenreIds).ToList();
+            if (missingGenreIds.Any())
+                return Error("One or more of the provided genres were not found!");
+        }
 
         Delete(entity.MovieGenres);
         entity.Name = request.Name?.Trim();
@@ -45,6 +56,6 @@ public class MovieUpdateHandler : Service<Movie>, IRequestHandler<MovieUpdateReq
         entity.GenreIds = request.GenreIds;
 
         await UpdateAsync(entity, cancellationToken);
-        return Success($"Movie with name \"{entity.Name}\" updated successfully.", entity.Id);
+        return Success("Movie updated successfully.", entity.Id);
     }
 }
