@@ -1,4 +1,4 @@
-﻿#nullable disable
+#nullable disable
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -72,6 +72,29 @@ namespace Users.API.Controllers
                 _logger.LogError("UsersGetById Exception: " + exception.Message);
                 // Return 500 Internal Server Error with an error command response with message
                 return StatusCode(StatusCodes.Status500InternalServerError, new CommandResponse(false, "An exception occured during UsersGetById.")); 
+            }
+        }
+
+        // POST: api/Users/Register  — public endpoint, no token required
+        [HttpPost("Register")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Register(UserRegisterRequest request)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var response = await _mediator.Send(request);
+                    if (response.IsSuccessful)
+                        return Ok(response);
+                    ModelState.AddModelError("UsersRegister", response.Message);
+                }
+                return BadRequest(new CommandResponse(false, string.Join("|", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("UsersRegister Exception: " + exception.Message);
+                return StatusCode(StatusCodes.Status500InternalServerError, new CommandResponse(false, "An exception occured during UsersRegister."));
             }
         }
 

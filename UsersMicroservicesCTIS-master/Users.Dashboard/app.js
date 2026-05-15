@@ -22,6 +22,7 @@ const globalSearch = document.getElementById('global-search');
 const addItemBtn = document.getElementById('add-item-btn');
 const modalContainer = document.getElementById('modal-container');
 const loginBtn = document.getElementById('login-btn');
+const registerBtn = document.getElementById('register-btn');
 
 // Initial Load
 document.addEventListener('DOMContentLoaded', () => {
@@ -38,9 +39,11 @@ function updateAuthUI() {
     if (jwtToken) {
         loginBtn.textContent = 'Logout';
         document.getElementById('user-profile').style.display = 'block';
+        registerBtn.style.display = 'none'; // hide Register when logged in
     } else {
         loginBtn.textContent = 'Login';
         document.getElementById('user-profile').style.display = 'none';
+        registerBtn.style.display = '';
     }
 }
 
@@ -139,6 +142,10 @@ function setupEventListeners() {
         } else {
             showLoginModal();
         }
+    });
+
+    registerBtn.addEventListener('click', () => {
+        showRegisterModal();
     });
 
     modalContainer.addEventListener('click', (e) => {
@@ -422,6 +429,47 @@ function renderMovies(movies) {
 }
 
 // Modal and Form Logic
+function showRegisterModal() {
+    const html = `
+        <div class="form-group">
+            <label class="form-label">Username <span style="color:var(--danger)">*</span></label>
+            <input type="text" name="userName" class="form-input" required placeholder="Choose a username" maxlength="30">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password <span style="color:var(--danger)">*</span></label>
+            <input type="password" name="password" class="form-input" required placeholder="Choose a password" maxlength="15">
+        </div>
+        <div class="form-group">
+            <label class="form-label">First Name</label>
+            <input type="text" name="firstName" class="form-input" placeholder="Optional" maxlength="50">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Last Name</label>
+            <input type="text" name="lastName" class="form-input" placeholder="Optional" maxlength="50">
+        </div>
+        <p style="font-size:0.8rem; color: var(--text-muted); margin-top: 4px;">Your account will be created with the <strong>User</strong> role.</p>
+    `;
+
+    showModalHtml("Create an Account", html, async (data) => {
+        try {
+            const res = await fetch(`${API_BASE}/Users/Register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json().catch(() => ({}));
+            if (res.ok && result.isSuccessful) {
+                showToast('Registered successfully! You can now log in.', 'success');
+                closeModal();
+            } else {
+                showToast('Registration failed: ' + (result.message || 'Unknown error'), 'error');
+            }
+        } catch (e) {
+            showToast('Error connecting to the registration service.', 'error');
+        }
+    }, false);
+}
+
 function showLoginModal() {
     const html = `
         <div class="form-group">
