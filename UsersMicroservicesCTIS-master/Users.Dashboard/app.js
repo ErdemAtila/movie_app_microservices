@@ -60,6 +60,42 @@ function setTokens(token, refresh) {
     updateAuthUI();
 }
 
+// Decode JWT payload and return the role claim (or null)
+function getJwtRole() {
+    if (!jwtToken || jwtToken === 'null') return [];
+    try {
+        const cleanToken = jwtToken.replace(/^(Bearer\s+)+/i, '').trim();
+        const payload = JSON.parse(atob(cleanToken.split('.')[1]));
+        // .NET emits roles under the full claim URI key
+        const roleKey = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
+        const role = payload[roleKey] || payload['role'] || payload['roles'];
+        if (Array.isArray(role)) return role;
+        return role ? [role] : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+// Returns { id, userName } decoded from the JWT, or null
+function getJwtPayload() {
+    if (!jwtToken || jwtToken === 'null') return null;
+    try {
+        const cleanToken = jwtToken.replace(/^(Bearer\s+)+/i, '').trim();
+        const payload = JSON.parse(atob(cleanToken.split('.')[1]));
+        const nameKey = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name';
+        return {
+            id: parseInt(payload['Id'] || payload['id'] || 0),
+            userName: payload[nameKey] || payload['name'] || payload['unique_name'] || null
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+function isAdmin() {
+    return getJwtRole().includes('Admin');
+}
+
 // Custom API fetcher to handle tokens
 async function apiCall(url, options = {}) {
     if (!options.headers) options.headers = {};
@@ -131,7 +167,13 @@ function setupEventListeners() {
     });
 
     addItemBtn.addEventListener('click', () => {
-        openModal(currentState.currentView);
+        const view = currentState.currentView;
+        const adminOnlyViews = ['movies', 'directors', 'genres', 'roles', 'groups'];
+        if (adminOnlyViews.includes(view) && !isAdmin()) {
+            showToast('Access denied: Admin role required.', 'error');
+            return;
+        }
+        openModal(view);
     });
 
     loginBtn.addEventListener('click', () => {
@@ -164,6 +206,14 @@ function updateUIHeader() {
     else viewName = view.charAt(0).toUpperCase() + view.slice(1, -1);
     
     btn.textContent = `+ New ${viewName}`;
+
+    // Hide the add button on admin-only views for non-admin users
+    const adminOnlyViews = ['movies', 'directors', 'genres', 'roles', 'groups'];
+    if (adminOnlyViews.includes(view) && !isAdmin()) {
+        btn.style.display = 'none';
+    } else {
+        btn.style.display = '';
+    }
 }
 
 async function loadData(type) {
@@ -244,9 +294,27 @@ function renderUsers(users) {
         return;
     }
 
+    const adminUser = isAdmin();
+    const jwtPayload = getJwtPayload();
+    const currentUserName = jwtPayload ? jwtPayload.userName : null;
+
     users.forEach(user => {
         const card = document.createElement('div');
         card.className = 'user-card';
+
+        // Determine what action buttons to show
+        let actionsHtml;
+        if (adminUser) {
+            // Admins see full edit + delete on all users
+            actionsHtml = getActionButtonsHTML(user.id, 'users');
+        } else if (currentUserName && user.userName === currentUserName) {
+            // Regular users: only edit their own profile (no delete)
+            actionsHtml = `<div class="card-actions"><button class="btn-icon edit" onclick="editItem('users', '${user.id}')" title="Edit my profile">✎</button></div>`;
+        } else {
+            // Other users' cards are view-only
+            actionsHtml = '<span style="font-size:0.75rem; color: var(--text-muted);">🔒 View only</span>';
+        }
+
         card.innerHTML = `
             <span class="status-badge ${user.isActive ? 'status-active' : 'status-inactive'}">
                 ${user.isActive ? 'ACTIVE' : 'INACTIVE'}
@@ -269,7 +337,7 @@ function renderUsers(users) {
                 </div>
             </div>
             <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
-                ${getActionButtonsHTML(user.id, 'users')}
+                ${actionsHtml}
             </div>
         `;
         mainDisplay.appendChild(card);
@@ -291,6 +359,10 @@ function renderGeneric(items, prefix, type) {
     if (type === 'groups') { icon = "👥"; bg = "linear-gradient(135deg, #fbbf24, #d97706)"; }
     if (type === 'roles') { icon = "🔑"; bg = "linear-gradient(135deg, #f87171, #dc2626)"; }
 
+    const adminUser = isAdmin();
+    const adminOnlyTypes = ['roles', 'groups', 'directors', 'genres'];
+    const showActions = adminUser || !adminOnlyTypes.includes(type);
+
     items.forEach(item => {
         const card = document.createElement('div');
         card.className = 'user-card'; 
@@ -304,7 +376,7 @@ function renderGeneric(items, prefix, type) {
                 </div>
             </div>
             <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
-                ${getActionButtonsHTML(item.id, type)}
+                ${showActions ? getActionButtonsHTML(item.id, type) : '<span style="font-size:0.75rem; color: var(--text-muted);">🔒 View only</span>'}
             </div>
         `;
         mainDisplay.appendChild(card);
@@ -391,6 +463,8 @@ function renderMovies(movies) {
         return;
     }
 
+    const adminUser = isAdmin();
+
     movies.forEach(movie => {
         const card = document.createElement('div');
         card.className = 'user-card'; 
@@ -421,7 +495,7 @@ function renderMovies(movies) {
                 </div>
             </div>
             <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
-                ${getActionButtonsHTML(movie.id, 'movies')}
+                ${adminUser ? getActionButtonsHTML(movie.id, 'movies') : '<span style="font-size:0.75rem; color: var(--text-muted);">🔒 View only</span>'}
             </div>
         `;
         mainDisplay.appendChild(card);
@@ -731,12 +805,14 @@ async function renderUserFormAsync(itemData = null) {
                 ${groupOptions}
             </select>
         </div>
+        ${isAdmin() ? `
         <div class="form-group">
             <label class="form-label">Roles (Hold Ctrl/Cmd to select multiple)</label>
             <select name="roleIds" class="form-select" multiple style="height: 100px">
                 ${roleOptions}
             </select>
-        </div>
+        </div>` : `
+        <input type="hidden" name="_rolesLocked" value="1">`}
         ${!itemData ? `
         <div class="form-group">
             <label class="form-label">Password</label>
@@ -746,10 +822,11 @@ async function renderUserFormAsync(itemData = null) {
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-input" required placeholder="Re-enter password to confirm changes">
         </div>`}
+        ${isAdmin() ? `
         <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
             <input type="checkbox" name="isActive" id="isActive" class="form-checkbox" ${itemData && itemData.isActive !== false ? 'checked' : 'checked'}>
             <label for="isActive" class="form-label" style="margin-bottom: 0">Is Active?</label>
-        </div>
+        </div>` : ''}
     `;
 
     const title = itemData ? "Edit User" : "Create New User";
