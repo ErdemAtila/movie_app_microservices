@@ -25,13 +25,13 @@
                     <span class="nav-icon">🔑</span> Roles
                 </a>
                 <a href="#" class="nav-item" data-view="groups">
-                    <span class="nav-icon">📁</span> Groups
+                    <span class="nav-icon">👥</span> Groups
                 </a>
                 <a href="#" class="nav-item" data-view="movies">
                     <span class="nav-icon">🎬</span> Movies
                 </a>
                 <a href="#" class="nav-item" data-view="directors">
-                    <span class="nav-icon">📽️</span> Directors
+                    <span class="nav-icon">🎭</span> Directors
                 </a>
                 <a href="#" class="nav-item" data-view="genres">
                     <span class="nav-icon">🏷️</span> Genres
@@ -52,8 +52,9 @@
                 </div>
                 <div class="header-actions">
                     <button class="btn btn-primary" id="add-item-btn">+ New User</button>
-                    <div class="user-profile">
-                        <img src="https://ui-avatars.com/api/?name=Admin&background=random" alt="Admin">
+                    <button class="btn btn-secondary" id="login-btn" style="background-color: var(--card-bg); border: 1px solid var(--border);">Login</button>
+                    <div class="user-profile" id="user-profile" style="display: none;">
+                        <img src="https://ui-avatars.com/api/?name=Admin&background=random" alt="Admin" id="user-avatar">
                     </div>
                 </div>
             </header>
@@ -87,6 +88,9 @@
 
     <!-- Modals -->
     <div id="modal-container" class="modal-backdrop"></div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
 
     <script src="app.js"></script>
 </body>

@@ -266,6 +266,30 @@ body {
     align-items: center;
     gap: 16px;
     margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.header-text {
+    flex: 1;
+    min-width: 0; /* Important for flex child text-overflow */
+}
+
+.user-fullname {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-handle {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin: 4px 0 0 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .avatar-large {
@@ -431,3 +455,67 @@ body {
 }
 
 .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+
+/* Toast Notifications */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 9999;
+}
+
+.toast {
+    background: #1e293b;
+    border-left: 4px solid var(--primary);
+    color: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    font-size: 0.9rem;
+    animation: slideIn 0.3s ease forwards;
+    opacity: 0;
+    transform: translateX(100%);
+    min-width: 250px;
+}
+
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--danger); }
+
+@keyframes slideIn {
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeOut {
+    to { opacity: 0; transform: translateX(100%); }
+}
+
+/* Card Action Buttons */
+.card-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-icon {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-icon.edit:hover { border-color: var(--accent); color: var(--accent); }
+.btn-icon.delete:hover { border-color: var(--danger); color: var(--danger); }

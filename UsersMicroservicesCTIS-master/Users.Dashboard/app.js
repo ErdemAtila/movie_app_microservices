@@ -1,5 +1,5 @@
 const API_BASE = 'https://localhost:7219/api';
-const MOVIES_BASE = 'http://localhost:5033/api';
+const MOVIES_BASE = 'https://localhost:7134/api';
 
 // State Management
 let currentState = {
@@ -12,12 +12,16 @@ let currentState = {
     currentView: 'users'
 };
 
+let jwtToken = localStorage.getItem('jwtToken') || null;
+let refreshToken = localStorage.getItem('refreshToken') || null;
+
 // DOM Elements
 const mainDisplay = document.getElementById('main-display');
 const navItems = document.querySelectorAll('.nav-item');
 const globalSearch = document.getElementById('global-search');
 const addItemBtn = document.getElementById('add-item-btn');
 const modalContainer = document.getElementById('modal-container');
+const loginBtn = document.getElementById('login-btn');
 
 // Initial Load
 document.addEventListener('DOMContentLoaded', () => {
@@ -26,7 +30,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function init() {
     setupEventListeners();
+    updateAuthUI();
     await loadData('users');
+}
+
+function updateAuthUI() {
+    if (jwtToken) {
+        loginBtn.textContent = 'Logout';
+        document.getElementById('user-profile').style.display = 'block';
+    } else {
+        loginBtn.textContent = 'Login';
+        document.getElementById('user-profile').style.display = 'none';
+    }
+}
+
+function setTokens(token, refresh) {
+    jwtToken = token;
+    refreshToken = refresh;
+    if (token) {
+        localStorage.setItem('jwtToken', token);
+        localStorage.setItem('refreshToken', refresh);
+    } else {
+        localStorage.removeItem('jwtToken');
+        localStorage.removeItem('refreshToken');
+    }
+    updateAuthUI();
+}
+
+// Custom API fetcher to handle tokens
+async function apiCall(url, options = {}) {
+    if (!options.headers) options.headers = {};
+    if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
+        options.headers['Content-Type'] = 'application/json';
+    }
+    if (jwtToken && jwtToken !== 'null') {
+        let cleanToken = jwtToken.replace(/^(Bearer\s+)+/i, '').trim();
+        options.headers['Authorization'] = `Bearer ${cleanToken}`;
+    }
+    
+    let response = await fetch(url, options);
+    
+    // Auto refresh logic based on 401
+    if (response.status === 401 && refreshToken) {
+    try {
+        let cleanToken = jwtToken ? jwtToken.replace(/^(Bearer\s+)+/i, '').trim() : '';
+        const refreshRes = await fetch(`${API_BASE}/RefreshToken`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: cleanToken, refreshToken: refreshToken })
+        });
+            if (refreshRes.ok) {
+                const data = await refreshRes.json();
+                let cleanToken = data.token.replace(/^(Bearer\s+)+/i, '').trim();
+                options.headers['Authorization'] = `Bearer ${cleanToken}`;
+                response = await fetch(url, options); // retry
+            } else {
+                setTokens(null, null);
+            }
+        } catch(e) {
+            setTokens(null, null);
+        }
+    }
+    return response;
+}
+
+// UI Helpers
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 function setupEventListeners() {
@@ -52,8 +131,18 @@ function setupEventListeners() {
         openModal(currentState.currentView);
     });
 
+    loginBtn.addEventListener('click', () => {
+        if (jwtToken) {
+            setTokens(null, null);
+            showToast('Logged out successfully', 'success');
+            loadData(currentState.currentView);
+        } else {
+            showLoginModal();
+        }
+    });
+
     modalContainer.addEventListener('click', (e) => {
-        if (e.target === modalContainer) closeModal();
+        // if (e.target === modalContainer) closeModal(); // Disabled by user request
     });
 }
 
@@ -74,18 +163,26 @@ async function loadData(type) {
     showLoading();
     let url = ""; 
     try {
-        url = `${API_BASE}/${type}`;
+        const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
+        url = `${API_BASE}/${capitalizedType}`;
         const moviesTypes = ['movies', 'directors', 'genres'];
-        // Capitalize for case-sensitive FS compatibility
         if (moviesTypes.some(t => type.startsWith(t))) {
-            const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
             url = `${MOVIES_BASE}/${capitalizedType}`;
         }
 
-        const response = await fetch(url);
+        const response = await apiCall(url);
+        
+        if (response.status === 401) {
+            showError("Authentication required. Please login.");
+            return;
+        }
+        if (response.status === 403) {
+            showError("Access Denied: You do not have permission to view this.");
+            return;
+        }
+        
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
-        // Handle 204 No Content:
         if (response.status === 204) {
             handleViewData(type, []);
             return;
@@ -106,19 +203,30 @@ function handleViewData(type, data) {
         renderUsers(data);
         updateStats(data);
     } else if (type === 'roles') {
-        renderGeneric(data, '🔑 Role');
+        currentState.roles = data;
+        renderGeneric(data, '🔑 Role', 'roles');
     } else if (type === 'groups') {
-        renderGeneric(data, '📁 Group');
+        currentState.groups = data;
+        renderGeneric(data, '📁 Group', 'groups');
     } else if (type === 'directors') {
         currentState.directors = data;
-        renderGeneric(data, '📽️ Director');
+        renderGeneric(data, '📽️ Director', 'directors');
     } else if (type === 'genres') {
         currentState.genres = data;
-        renderGeneric(data, '🏷️ Genre');
+        renderGeneric(data, '🏷️ Genre', 'genres');
     } else if (type === 'movies') {
         currentState.movies = data;
         renderMovies(data);
     }
+}
+
+function getActionButtonsHTML(id, type) {
+    return `
+        <div class="card-actions">
+            <button class="btn-icon edit" onclick="editItem('${type}', '${id}')" title="Edit">✎</button>
+            <button class="btn-icon delete" onclick="deleteItem('${type}', '${id}')" title="Delete">🗑</button>
+        </div>
+    `;
 }
 
 function renderUsers(users) {
@@ -136,8 +244,8 @@ function renderUsers(users) {
             <span class="status-badge ${user.isActive ? 'status-active' : 'status-inactive'}">
                 ${user.isActive ? 'ACTIVE' : 'INACTIVE'}
             </span>
-            <div class="card-header">
-                <img src="https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=random" class="avatar-large" alt="Avatar">
+            <div class="card-header" style="padding-right: 90px;">
+                <img src="https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=random" class="avatar-large" alt="Avatar">
                 <div class="header-text">
                     <h3 class="user-fullname">${user.firstName ?? ''} ${user.lastName ?? ''}</h3>
                     <p class="user-handle">@${user.userName}</p>
@@ -145,41 +253,51 @@ function renderUsers(users) {
             </div>
             <div class="card-body">
                 <div class="info-item">
-                    <p class="info-label">Score</p>
-                    <p class="info-value">★ ${user.score.toFixed(1)}</p>
-                </div>
-                <div class="info-item">
                     <p class="info-label">Join Date</p>
-                    <p class="info-value">${new Date(user.registrationDate).toLocaleDateString()}</p>
+                    <p class="info-value">${user.registrationDate && user.registrationDate !== '0001-01-01T00:00:00' ? new Date(user.registrationDate).toLocaleDateString() : 'N/A'}</p>
                 </div>
                 <div class="info-item">
-                    <p class="info-label">Location</p>
-                    <p class="info-value">${user.address || 'Not set'}</p>
+                    <p class="info-label">Group</p>
+                    <p class="info-value">${user.groupF || 'None'}</p>
                 </div>
             </div>
-            <div class="card-footer">
-                <button class="btn btn-primary" onclick="alert('Viewing profile for ${user.userName}')">View Full Profile</button>
+            <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                ${getActionButtonsHTML(user.id, 'users')}
             </div>
         `;
         mainDisplay.appendChild(card);
     });
 }
 
-function renderGeneric(items, prefix) {
+function renderGeneric(items, prefix, type) {
     mainDisplay.innerHTML = '';
+    
+    if (!items || items.length === 0) {
+        mainDisplay.innerHTML = `<div class="no-data">No ${type} found.</div>`;
+        return;
+    }
+
+    let icon = "❓";
+    let bg = "linear-gradient(135deg, #64748b, #334155)";
+    if (type === 'directors') { icon = "🎭"; bg = "linear-gradient(135deg, #a855f7, #3b82f6)"; }
+    if (type === 'genres') { icon = "🏷️"; bg = "linear-gradient(135deg, #34d399, #059669)"; }
+    if (type === 'groups') { icon = "👥"; bg = "linear-gradient(135deg, #fbbf24, #d97706)"; }
+    if (type === 'roles') { icon = "🔑"; bg = "linear-gradient(135deg, #f87171, #dc2626)"; }
+
     items.forEach(item => {
         const card = document.createElement('div');
-        card.className = 'user-card'; // Reuse styling
+        card.className = 'user-card'; 
+        const name = item.fullName || item.name || item.title || 'Unnamed';
         card.innerHTML = `
             <div class="card-header">
-                <div class="logo-icon" style="background: #1e293b; color: white">${prefix.charAt(0)}</div>
+                <div class="logo-icon" style="background: ${bg}; color: white; display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 12px; font-size: 1.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.2); flex-shrink: 0;">${icon}</div>
                 <div class="header-text">
-                    <h3 class="user-fullname">${item.fullName || item.name || item.title}</h3>
+                    <h3 class="user-fullname">${name}</h3>
                     <p class="user-handle">ID: ${item.id}</p>
                 </div>
             </div>
-            <div class="card-footer">
-                <button class="btn btn-primary">Edit Settings</button>
+            <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                ${getActionButtonsHTML(item.id, type)}
             </div>
         `;
         mainDisplay.appendChild(card);
@@ -190,10 +308,9 @@ function updateStats(users) {
     document.getElementById('stat-total-users').textContent = users.length;
     document.getElementById('stat-active-users').textContent = users.filter(u => u.isActive).length;
     
-    const avgScore = users.length > 0 
-        ? (users.reduce((acc, u) => acc + u.score, 0) / users.length).toFixed(1)
-        : '0.0';
-    document.getElementById('stat-avg-score').textContent = avgScore;
+    document.getElementById('stat-avg-score').textContent = users.filter(u => !u.isActive).length;
+    const avgScoreLabel = document.querySelector('#stat-avg-score').previousElementSibling;
+    if (avgScoreLabel) avgScoreLabel.textContent = 'Inactive Users';
 }
 
 function handleSearch(query) {
@@ -210,9 +327,9 @@ function handleSearch(query) {
 
     if (currentState.currentView === 'directors') {
         const filtered = currentState.directors.filter(d => 
-            d.fullName.toLowerCase().includes(q)
+            (d.fullName || d.firstName + ' ' + d.lastName).toLowerCase().includes(q)
         );
-        renderGeneric(filtered, '📽️ Director');
+        renderGeneric(filtered, '📽️ Director', 'directors');
         return;
     }
 
@@ -220,7 +337,15 @@ function handleSearch(query) {
         const filtered = currentState.genres.filter(g => 
             g.name.toLowerCase().includes(q)
         );
-        renderGeneric(filtered, '🏷️ Genre');
+        renderGeneric(filtered, '🏷️ Genre', 'genres');
+        return;
+    }
+
+    if (currentState.currentView === 'groups') {
+        const filtered = currentState.groups.filter(g => 
+            g.title.toLowerCase().includes(q)
+        );
+        renderGeneric(filtered, '📁 Group', 'groups');
         return;
     }
 
@@ -246,7 +371,7 @@ function showError(message) {
         <div class="loading-overlay" style="color: var(--danger)">
             <span style="font-size: 3rem">⚠️</span>
             <p>${message}</p>
-            <button class="btn btn-primary" onclick="location.reload()">Retry Connection</button>
+            <button class="btn btn-primary" onclick="loadData(currentState.currentView)">Retry Connection</button>
         </div>
     `;
 }
@@ -255,7 +380,7 @@ function renderMovies(movies) {
     mainDisplay.innerHTML = '';
     
     if (!movies || movies.length === 0) {
-        mainDisplay.innerHTML = '<div class="no-data">No movies found. Add them via Swagger (Port 7134).</div>';
+        mainDisplay.innerHTML = '<div class="no-data">No movies found. Add them via Swagger or Add Button.</div>';
         return;
     }
 
@@ -263,37 +388,33 @@ function renderMovies(movies) {
         const card = document.createElement('div');
         card.className = 'user-card'; 
         
-        const genres = movie.movieGenres && movie.movieGenres.length > 0 
-            ? movie.movieGenres.map(mg => mg.genre.name).join(', ') 
-            : 'No Genre';
-
         card.innerHTML = `
             <span class="status-badge status-active" style="background: rgba(34, 211, 238, 0.1); color: var(--accent)">
                 🎬 MOVIE
             </span>
-            <div class="card-header">
-                <div class="logo-icon" style="background: linear-gradient(135deg, #f59e0b, #ef4444)">🎬</div>
+            <div class="card-header" style="padding-right: 90px;">
+                <div class="logo-icon" style="background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 12px; font-size: 1.5rem; flex-shrink: 0;">🎬</div>
                 <div class="header-text">
                     <h3 class="user-fullname">${movie.name}</h3>
-                    <p class="user-handle">${new Date(movie.releaseDate).getFullYear() || 'N/A'}</p>
+                    <p class="user-handle">${movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : 'N/A'}</p>
                 </div>
             </div>
             <div class="card-body">
                 <div class="info-item">
                     <p class="info-label">Director</p>
-                    <p class="info-value">${movie.directorF}</p>
+                    <p class="info-value">${movie.directorF || 'Unknown'}</p>
                 </div>
                 <div class="info-item">
                     <p class="info-label">Genres</p>
-                    <p class="info-value" style="font-size: 0.85rem">${movie.genresF.join(', ')}</p>
+                    <p class="info-value" style="font-size: 0.85rem">${(movie.genresF || []).join(', ') || 'No Genre'}</p>
                 </div>
                 <div class="info-item">
                     <p class="info-label">Revenue</p>
-                    <p class="info-value" style="color: #10b981">${movie.totalRevenueF}</p>
+                    <p class="info-value" style="color: #10b981">${movie.totalRevenueF || '$0'}</p>
                 </div>
             </div>
-            <div class="card-footer">
-                <button class="btn btn-primary" onclick="alert('Viewing trailer for ${movie.name}')">Watch Trailer</button>
+            <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                ${getActionButtonsHTML(movie.id, 'movies')}
             </div>
         `;
         mainDisplay.appendChild(card);
@@ -301,60 +422,124 @@ function renderMovies(movies) {
 }
 
 // Modal and Form Logic
-function openModal(view) {
-    let title = "";
-    let formHtml = "";
+function showLoginModal() {
+    const html = `
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" name="userName" class="form-input" required placeholder="Enter username">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-input" required placeholder="Enter password">
+        </div>
+    `;
+    
+    showModalHtml("Login", html, async (data) => {
+        try {
+            const res = await fetch(`${API_BASE}/Token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (res.ok) {
+                const tokenData = await res.json();
+                if (tokenData.token) {
+                    setTokens(tokenData.token, tokenData.refreshToken);
+                    showToast('Logged in successfully', 'success');
+                    closeModal();
+                    loadData(currentState.currentView);
+                } else {
+                    showToast('Login failed: ' + (tokenData.message || 'No token'), 'error');
+                }
+            } else {
+                showToast('Login failed: Invalid credentials', 'error');
+            }
+        } catch (e) {
+            showToast('Error connecting to authentication service', 'error');
+        }
+    });
+}
+
+async function openModal(view, itemData = null) {
+    let title = itemData ? `Edit ${view.slice(0, -1)}` : `Create New ${view.slice(0, -1)}`;
 
     if (view === 'movies') {
-        title = "Create New Movie";
-        renderMovieForm();
-        return; // handleMovieForm is async
-    } else if (view === 'directors') {
-        title = "Create New Director";
-        formHtml = renderDirectorForm();
-    } else if (view === 'genres') {
-        title = "Create New Genre";
-        formHtml = renderGenreForm();
-    } else {
-        alert(`Creation for ${view} view is not implemented yet.`);
+        await renderMovieForm(itemData);
+        return; 
+    } else if (view === 'users') {
+        await renderUserFormAsync(itemData);
         return;
     }
 
-    showModalHtml(title, formHtml);
+    let formHtml = "";
+    if (view === 'directors') {
+        formHtml = renderDirectorForm(itemData);
+    } else if (view === 'genres') {
+        formHtml = renderGenreForm(itemData);
+    } else if (view === 'groups') {
+        formHtml = renderGroupForm(itemData);
+    } else if (view === 'roles') {
+        formHtml = renderRoleForm(itemData);
+    } else {
+        showToast(`Creation for ${view} is not implemented.`, 'error');
+        return;
+    }
+
+    showModalHtml(title, formHtml, async (data) => {
+        let finalData = itemData ? { ...itemData, ...data } : { ...data };
+        if (itemData && itemData.id) finalData.id = itemData.id;
+        await saveItem(view, finalData, !!itemData);
+    }, !!itemData);
 }
 
-function showModalHtml(title, html) {
+function showModalHtml(title, html, onSubmit, isEdit = true) {
     modalContainer.innerHTML = `
-        <div class="modal-card">
-            <div class="modal-header">
+        <div class="modal-card" style="max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
                 <h2>${title}</h2>
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
-            <form id="creation-form">
-                ${html}
-                <div class="form-actions">
+            <form id="creation-form" style="display: flex; flex-direction: column; overflow: hidden;">
+                <div style="overflow-y: auto; padding-right: 8px; margin-bottom: 16px;">
+                    ${html}
+                </div>
+                <div class="form-actions" style="flex-shrink: 0; margin-top: 0;">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? 'Save Changes' : 'Create'}</button>
                 </div>
             </form>
         </div>
     `;
     modalContainer.style.display = 'flex';
     
-    document.getElementById('creation-form').addEventListener('submit', async (e) => {
+    document.getElementById('creation-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
         const data = Object.fromEntries(formData.entries());
         
-        // Custom handling for checkboxes and arrays
+        // Parse specific field types correctly
         if (data.isRetired !== undefined) data.isRetired = e.target.isRetired.checked;
+        if (data.isActive !== undefined) data.isActive = e.target.isActive.checked;
         if (e.target.genreIds) {
             data.genreIds = Array.from(e.target.genreIds.selectedOptions).map(opt => parseInt(opt.value));
         }
+        if (e.target.roleIds) {
+            data.roleIds = Array.from(e.target.roleIds.selectedOptions).map(opt => parseInt(opt.value));
+        }
         if (data.directorId) data.directorId = parseInt(data.directorId);
+        if (data.groupId) data.groupId = parseInt(data.groupId);
         if (data.totalRevenue) data.totalRevenue = parseFloat(data.totalRevenue);
+        if (data.score) data.score = parseFloat(data.score);
+        if (data.countryId) data.countryId = parseInt(data.countryId);
+        if (data.cityId) data.cityId = parseInt(data.cityId);
+        if (data.gender) data.gender = parseInt(data.gender);
 
-        await saveItem(currentState.currentView, data);
+        // Convert empty string dates to null to avoid backend parse errors
+        for (let key in data) {
+            if (data[key] === '') data[key] = null;
+        }
+
+        if (onSubmit) onSubmit(data);
     });
 }
 
@@ -363,51 +548,187 @@ function closeModal() {
     modalContainer.innerHTML = '';
 }
 
-function renderDirectorForm() {
+function renderDirectorForm(data = null) {
     return `
         <div class="form-group">
             <label class="form-label">First Name</label>
-            <input type="text" name="firstName" class="form-input" required placeholder="e.g. Christopher">
+            <input type="text" name="firstName" class="form-input" required placeholder="e.g. Christopher" value="${data && data.firstName ? data.firstName : ''}">
         </div>
         <div class="form-group">
             <label class="form-label">Last Name</label>
-            <input type="text" name="lastName" class="form-input" required placeholder="e.g. Nolan">
+            <input type="text" name="lastName" class="form-input" required placeholder="e.g. Nolan" value="${data && data.lastName ? data.lastName : ''}">
         </div>
         <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-            <input type="checkbox" name="isRetired" id="isRetired" class="form-checkbox">
+            <input type="checkbox" name="isRetired" id="isRetired" class="form-checkbox" ${data && data.isRetired ? 'checked' : ''}>
             <label for="isRetired" class="form-label" style="margin-bottom: 0">Is Retired?</label>
         </div>
     `;
 }
 
-function renderGenreForm() {
+function renderGenreForm(data = null) {
     return `
         <div class="form-group">
             <label class="form-label">Genre Name</label>
-            <input type="text" name="name" class="form-input" required placeholder="e.g. Sci-Fi">
+            <input type="text" name="name" class="form-input" required placeholder="e.g. Sci-Fi" value="${data && data.name ? data.name : ''}">
         </div>
     `;
 }
 
-async function renderMovieForm() {
-    const directors = await fetch(`${MOVIES_BASE}/directors`).then(res => res.ok ? res.json() : []);
-    const genres = await fetch(`${MOVIES_BASE}/genres`).then(res => res.ok ? res.json() : []);
+function renderGroupForm(data = null) {
+    return `
+        <div class="form-group">
+            <label class="form-label">Group Title</label>
+            <input type="text" name="title" class="form-input" required placeholder="e.g. Admins" value="${data && data.title ? data.title : ''}">
+        </div>
+    `;
+}
 
-    const directorOptions = directors.map(d => `<option value="${d.id}">${d.firstName} ${d.lastName}</option>`).join('');
-    const genreOptions = genres.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+function renderRoleForm(data = null) {
+    return `
+        <div class="form-group">
+            <label class="form-label">Role Name</label>
+            <input type="text" name="name" class="form-input" required placeholder="e.g. Moderator" value="${data && data.name ? data.name : ''}">
+        </div>
+    `;
+}
+
+async function renderUserFormAsync(itemData = null) {
+    let groups = [];
+    let roles = [];
+    try {
+        const gRes = await apiCall(`${API_BASE}/Groups`);
+        if (gRes.ok) groups = await gRes.json();
+        
+        const rRes = await apiCall(`${API_BASE}/Roles`);
+        if (rRes.ok) roles = await rRes.json();
+    } catch(e) {
+        showToast('Warning: Could not fetch groups or roles', 'error');
+    }
+
+    const groupOptions = groups.map(g => `<option value="${g.id}" ${itemData && itemData.groupId === g.id ? 'selected' : ''}>${g.title}</option>`).join('');
+    
+    let selectedRoleIds = [];
+    if (itemData && itemData.userRoles) {
+        selectedRoleIds = itemData.userRoles.map(ur => ur.roleId);
+    } else if (itemData && itemData.roleIds) {
+        selectedRoleIds = itemData.roleIds;
+    }
+    const roleOptions = roles.map(r => `<option value="${r.id}" ${selectedRoleIds.includes(r.id) ? 'selected' : ''}>${r.name}</option>`).join('');
+
+    const html = `
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" name="userName" class="form-input" required value="${itemData && itemData.userName ? itemData.userName : ''}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">First Name</label>
+            <input type="text" name="firstName" class="form-input" value="${itemData && itemData.firstName ? itemData.firstName : ''}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Last Name</label>
+            <input type="text" name="lastName" class="form-input" value="${itemData && itemData.lastName ? itemData.lastName : ''}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Gender</label>
+            <select name="gender" class="form-select">
+                <option value="0" ${itemData && itemData.gender === 0 ? 'selected' : ''}>Unknown</option>
+                <option value="1" ${itemData && itemData.gender === 1 ? 'selected' : ''}>Male</option>
+                <option value="2" ${itemData && itemData.gender === 2 ? 'selected' : ''}>Female</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Birth Date</label>
+            <input type="date" name="birthDate" class="form-input" value="${itemData && itemData.birthDate && itemData.birthDate.includes('T') ? itemData.birthDate.split('T')[0] : ''}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Score</label>
+            <input type="number" name="score" class="form-input" step="0.1" value="${itemData && itemData.score !== undefined ? itemData.score : 0}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Address</label>
+            <input type="text" name="address" class="form-input" value="${itemData && itemData.address ? itemData.address : ''}">
+        </div>
+        <div class="form-group" style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+                <label class="form-label">Country ID</label>
+                <input type="number" name="countryId" class="form-input" value="${itemData && itemData.countryId !== undefined ? itemData.countryId : 0}">
+            </div>
+            <div style="flex: 1;">
+                <label class="form-label">City ID</label>
+                <input type="number" name="cityId" class="form-input" value="${itemData && itemData.cityId !== undefined ? itemData.cityId : 0}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Group</label>
+            <select name="groupId" class="form-select">
+                <option value="0">No Group...</option>
+                ${groupOptions}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Roles (Hold Ctrl/Cmd to select multiple)</label>
+            <select name="roleIds" class="form-select" multiple style="height: 100px">
+                ${roleOptions}
+            </select>
+        </div>
+        ${!itemData ? `
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-input" required>
+        </div>` : ''}
+        <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+            <input type="checkbox" name="isActive" id="isActive" class="form-checkbox" ${itemData && itemData.isActive !== false ? 'checked' : 'checked'}>
+            <label for="isActive" class="form-label" style="margin-bottom: 0">Is Active?</label>
+        </div>
+    `;
+
+    const title = itemData ? "Edit User" : "Create New User";
+    showModalHtml(title, html, async (data) => {
+        let finalData = itemData ? { ...itemData, ...data } : { ...data };
+        if (itemData && itemData.id) finalData.id = itemData.id;
+        
+        // Defaults for new users
+        if (!itemData) {
+            finalData.registrationDate = new Date().toISOString();
+        }
+        
+        await saveItem('users', finalData, !!itemData);
+    }, !!itemData);
+}
+
+async function renderMovieForm(itemData = null) {
+    let directors = [];
+    let genres = [];
+    try {
+        const dRes = await apiCall(`${MOVIES_BASE}/Directors`);
+        if (dRes.ok) directors = await dRes.json();
+        
+        const gRes = await apiCall(`${MOVIES_BASE}/Genres`);
+        if (gRes.ok) genres = await gRes.json();
+    } catch(e) {
+        showToast('Warning: Could not fetch directors or genres for dropdowns', 'error');
+    }
+
+    const directorOptions = directors.map(d => `<option value="${d.id}" ${itemData && itemData.directorId === d.id ? 'selected' : ''}>${d.firstName} ${d.lastName}</option>`).join('');
+    
+    let selectedGenreIds = [];
+    if (itemData && itemData.movieGenres) {
+        selectedGenreIds = itemData.movieGenres.map(mg => mg.genreId);
+    }
+    const genreOptions = genres.map(g => `<option value="${g.id}" ${selectedGenreIds.includes(g.id) ? 'selected' : ''}>${g.name}</option>`).join('');
 
     const html = `
         <div class="form-group">
             <label class="form-label">Movie Title</label>
-            <input type="text" name="name" class="form-input" required placeholder="e.g. Inception">
+            <input type="text" name="name" class="form-input" required placeholder="e.g. Inception" value="${itemData && itemData.name ? itemData.name : ''}">
         </div>
         <div class="form-group">
             <label class="form-label">Release Date</label>
-            <input type="date" name="releaseDate" class="form-input">
+            <input type="date" name="releaseDate" class="form-input" value="${itemData && itemData.releaseDate && itemData.releaseDate.includes('T') ? itemData.releaseDate.split('T')[0] : ''}">
         </div>
         <div class="form-group">
             <label class="form-label">Total Revenue ($)</label>
-            <input type="number" name="totalRevenue" class="form-input" step="0.01" placeholder="0.00">
+            <input type="number" name="totalRevenue" class="form-input" step="0.01" placeholder="0.00" value="${itemData && itemData.totalRevenue !== undefined ? itemData.totalRevenue : ''}">
         </div>
         <div class="form-group">
             <label class="form-label">Director</label>
@@ -423,30 +744,83 @@ async function renderMovieForm() {
             </select>
         </div>
     `;
-    showModalHtml("Create New Movie", html);
+    const title = itemData ? "Edit Movie" : "Create New Movie";
+    showModalHtml(title, html, async (data) => {
+        let finalData = itemData ? { ...itemData, ...data } : { ...data };
+        if (itemData && itemData.id) finalData.id = itemData.id;
+        await saveItem('movies', finalData, !!itemData);
+    }, !!itemData);
 }
 
-async function saveItem(view, data) {
-    let endpoint = view === 'movies' ? 'movies' : view;
-    let url = `${MOVIES_BASE}/${endpoint}`;
+async function saveItem(view, data, isEdit) {
+    const moviesTypes = ['movies', 'directors', 'genres'];
+    let baseUrl = API_BASE;
+    let endpoint = view;
+    
+    if (moviesTypes.includes(view)) {
+        baseUrl = MOVIES_BASE;
+        endpoint = view.charAt(0).toUpperCase() + view.slice(1);
+    } else {
+        endpoint = view.charAt(0).toUpperCase() + view.slice(1);
+    }
+
+    const url = `${baseUrl}/${endpoint}`;
+    const method = isEdit ? 'PUT' : 'POST';
 
     try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        const response = await apiCall(url, {
+            method: method,
             body: JSON.stringify(data)
         });
 
-        const result = await response.json();
-        if (response.ok && result.isSuccessful) {
-            alert(result.message || "Saved successfully!");
+        const result = await response.json().catch(() => ({}));
+        
+        if (response.ok && (result.isSuccessful || result.isSuccessful === undefined)) {
+            showToast(result.message || "Saved successfully!");
             closeModal();
             loadData(view);
         } else {
-            alert("Error: " + (result.message || "Failed to save item."));
+            showToast("Error: " + (result.message || "Failed to save item."), "error");
         }
     } catch (error) {
-        console.error("Save Error:", error);
-        alert("Exception: Could not connect to microservice.");
+        showToast("Exception: Could not connect to microservice.", "error");
+    }
+}
+
+async function editItem(type, id) {
+    // Ensure ID comparison works accurately even if ID is string/number mismatch
+    const item = currentState[type].find(x => x.id == id);
+    if (item) {
+        openModal(type, item);
+    } else {
+        showToast("Error: Item not found", "error");
+    }
+}
+
+async function deleteItem(type, id) {
+    if (!confirm(`Are you sure you want to delete this item?`)) return;
+
+    const moviesTypes = ['movies', 'directors', 'genres'];
+    let baseUrl = API_BASE;
+    let endpoint = type.charAt(0).toUpperCase() + type.slice(1);
+    
+    if (moviesTypes.includes(type)) {
+        baseUrl = MOVIES_BASE;
+    }
+
+    const url = `${baseUrl}/${endpoint}/${id}`;
+
+    try {
+        const response = await apiCall(url, { method: 'DELETE' });
+        
+        if (response.ok) {
+            showToast("Deleted successfully!");
+            loadData(type);
+        } else {
+            const result = await response.json().catch(() => ({}));
+            showToast("Error: " + (result.message || "Failed to delete item."), "error");
+        }
+    } catch (error) {
+        showToast("Exception: Could not connect to microservice.", "error");
     }
 }
