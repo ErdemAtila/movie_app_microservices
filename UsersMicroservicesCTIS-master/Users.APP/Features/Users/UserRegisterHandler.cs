@@ -20,6 +20,9 @@ namespace Users.APP.Features.Users
 
         [StringLength(50)]
         public string LastName { get; set; }
+
+        [Required]
+        public int RoleId { get; set; }
     }
 
     public class UserRegisterHandler : Service<User>, IRequestHandler<UserRegisterRequest, CommandResponse>
@@ -37,10 +40,10 @@ namespace Users.APP.Features.Users
             if (await DbSet().AnyAsync(u => u.UserName == request.UserName.Trim() && u.IsActive, cancellationToken))
                 return Error("An active user with this username already exists.");
 
-            // Find the "User" role seeded in Program.cs
-            var userRole = await _db.Set<Role>().FirstOrDefaultAsync(r => r.Name == "User", cancellationToken);
-            if (userRole is null)
-                return Error("The 'User' role has not been configured. Please contact an administrator.");
+            // Find the selected role
+            var role = await _db.Set<Role>().FirstOrDefaultAsync(r => r.Id == request.RoleId, cancellationToken);
+            if (role is null)
+                return Error("The selected role does not exist.");
 
             var entity = new User
             {
@@ -50,7 +53,7 @@ namespace Users.APP.Features.Users
                 LastName         = request.LastName?.Trim(),
                 IsActive         = true,
                 RegistrationDate = DateTime.Now,
-                RoleIds          = new List<int> { userRole.Id }
+                RoleIds          = new List<int> { role.Id }
             };
 
             await CreateAsync(entity, cancellationToken);

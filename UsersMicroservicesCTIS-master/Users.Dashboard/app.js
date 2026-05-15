@@ -429,7 +429,17 @@ function renderMovies(movies) {
 }
 
 // Modal and Form Logic
-function showRegisterModal() {
+async function showRegisterModal() {
+    let roles = [];
+    try {
+        const res = await fetch(`${API_BASE}/Roles`);
+        if (res.ok) roles = await res.json();
+    } catch(e) {
+        showToast('Warning: Could not fetch roles for selection', 'error');
+    }
+
+    const roleOptions = roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+
     const html = `
         <div class="form-group">
             <label class="form-label">Username <span style="color:var(--danger)">*</span></label>
@@ -447,7 +457,13 @@ function showRegisterModal() {
             <label class="form-label">Last Name</label>
             <input type="text" name="lastName" class="form-input" placeholder="Optional" maxlength="50">
         </div>
-        <p style="font-size:0.8rem; color: var(--text-muted); margin-top: 4px;">Your account will be created with the <strong>User</strong> role.</p>
+        <div class="form-group">
+            <label class="form-label">Select Role <span style="color:var(--danger)">*</span></label>
+            <select name="roleId" class="form-select" required>
+                <option value="">Select a role...</option>
+                ${roleOptions}
+            </select>
+        </div>
     `;
 
     showModalHtml("Create an Account", html, async (data) => {
@@ -578,6 +594,7 @@ function showModalHtml(title, html, onSubmit, isEdit = true) {
         if (data.totalRevenue !== undefined) data.totalRevenue = data.totalRevenue !== '' ? parseFloat(data.totalRevenue) : null;
         if (data.score !== undefined) data.score = data.score !== '' ? parseFloat(data.score) : 0;
         if (data.gender !== undefined) data.gender = parseInt(data.gender) || 0;
+        if (data.roleId !== undefined) data.roleId = parseInt(data.roleId) || 0;
         // BUG FIX: 0 means "none selected" for optional FKs — must send null, not 0
         // Sending 0 causes EF Core to look for a Group/Country/City with Id=0 → 500 error
         if (data.groupId !== undefined) data.groupId = parseInt(data.groupId) || null;
