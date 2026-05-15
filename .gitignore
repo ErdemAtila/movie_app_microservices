@@ -1,0 +1,23 @@
+# Standard .NET gitignore
+[Bb]in/
+[Oo]bj/
+[Tt]est[Rr]esults/
+
+# IDE files
+.idea/
+.vs/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# User-specific
+*.user
+*.userosscache
+*.sln.docstates
+
+# Remote-specific
+.env
