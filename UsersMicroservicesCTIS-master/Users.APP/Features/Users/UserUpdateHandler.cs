@@ -1,4 +1,4 @@
-﻿using CORE.APP.Models;
+using CORE.APP.Models;
 using CORE.APP.Services;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -68,13 +68,13 @@ namespace Users.APP.Features.Users
             entity.RoleIds = request.RoleIds; // assign new role ids
             entity.GroupId = request.GroupId;
             entity.Gender = request.Gender;
-            entity.FirstName = request.FirstName.Trim();
-            entity.Address = request.Address.Trim();
+            entity.FirstName = request.FirstName?.Trim();
+            entity.Address = request.Address?.Trim();
             entity.BirthDate = request.BirthDate;
             entity.CityId = request.CityId;
             entity.CountryId = request.CountryId;
             entity.IsActive = request.IsActive;
-            entity.LastName = request.LastName.Trim();
+            entity.LastName = request.LastName?.Trim();
             entity.Password = request.Password;
             entity.RegistrationDate = request.RegistrationDate;
             entity.Score = request.Score;

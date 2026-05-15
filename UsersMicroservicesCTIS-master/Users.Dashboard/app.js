@@ -519,20 +519,22 @@ function showModalHtml(title, html, onSubmit, isEdit = true) {
         
         // Parse specific field types correctly
         if (data.isRetired !== undefined) data.isRetired = e.target.isRetired.checked;
-        if (data.isActive !== undefined) data.isActive = e.target.isActive.checked;
+        if (e.target.isActive) data.isActive = e.target.isActive.checked; // always read checkbox directly
         if (e.target.genreIds) {
             data.genreIds = Array.from(e.target.genreIds.selectedOptions).map(opt => parseInt(opt.value));
         }
         if (e.target.roleIds) {
             data.roleIds = Array.from(e.target.roleIds.selectedOptions).map(opt => parseInt(opt.value));
         }
-        if (data.directorId) data.directorId = parseInt(data.directorId);
-        if (data.groupId) data.groupId = parseInt(data.groupId);
-        if (data.totalRevenue) data.totalRevenue = parseFloat(data.totalRevenue);
-        if (data.score) data.score = parseFloat(data.score);
-        if (data.countryId) data.countryId = parseInt(data.countryId);
-        if (data.cityId) data.cityId = parseInt(data.cityId);
-        if (data.gender) data.gender = parseInt(data.gender);
+        if (data.directorId !== undefined) data.directorId = parseInt(data.directorId) || null;
+        if (data.totalRevenue !== undefined) data.totalRevenue = data.totalRevenue !== '' ? parseFloat(data.totalRevenue) : null;
+        if (data.score !== undefined) data.score = data.score !== '' ? parseFloat(data.score) : 0;
+        if (data.gender !== undefined) data.gender = parseInt(data.gender) || 0;
+        // BUG FIX: 0 means "none selected" for optional FKs — must send null, not 0
+        // Sending 0 causes EF Core to look for a Group/Country/City with Id=0 → 500 error
+        if (data.groupId !== undefined) data.groupId = parseInt(data.groupId) || null;
+        if (data.countryId !== undefined) data.countryId = parseInt(data.countryId) || null;
+        if (data.cityId !== undefined) data.cityId = parseInt(data.cityId) || null;
 
         // Convert empty string dates to null to avoid backend parse errors
         for (let key in data) {
@@ -608,9 +610,8 @@ async function renderUserFormAsync(itemData = null) {
     const groupOptions = groups.map(g => `<option value="${g.id}" ${itemData && itemData.groupId === g.id ? 'selected' : ''}>${g.title}</option>`).join('');
     
     let selectedRoleIds = [];
-    if (itemData && itemData.userRoles) {
-        selectedRoleIds = itemData.userRoles.map(ur => ur.roleId);
-    } else if (itemData && itemData.roleIds) {
+    if (itemData && itemData.roleIds) {
+        // API GET response returns roleIds directly as int[]
         selectedRoleIds = itemData.roleIds;
     }
     const roleOptions = roles.map(r => `<option value="${r.id}" ${selectedRoleIds.includes(r.id) ? 'selected' : ''}>${r.name}</option>`).join('');
@@ -675,7 +676,11 @@ async function renderUserFormAsync(itemData = null) {
         <div class="form-group">
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-input" required>
-        </div>` : ''}
+        </div>` : `
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-input" required placeholder="Re-enter password to confirm changes">
+        </div>`}
         <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
             <input type="checkbox" name="isActive" id="isActive" class="form-checkbox" ${itemData && itemData.isActive !== false ? 'checked' : 'checked'}>
             <label for="isActive" class="form-label" style="margin-bottom: 0">Is Active?</label>
@@ -687,9 +692,11 @@ async function renderUserFormAsync(itemData = null) {
         let finalData = itemData ? { ...itemData, ...data } : { ...data };
         if (itemData && itemData.id) finalData.id = itemData.id;
         
-        // Defaults for new users
+        // Preserve registrationDate: keep existing for edits, set current time for new users
         if (!itemData) {
             finalData.registrationDate = new Date().toISOString();
+        } else if (!finalData.registrationDate) {
+            finalData.registrationDate = itemData.registrationDate;
         }
         
         await saveItem('users', finalData, !!itemData);
